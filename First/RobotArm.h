@@ -1,4 +1,5 @@
 #pragma once
+#include "RobotArmControl.h"
 
 namespace RobotArm
 {
@@ -6,6 +7,6 @@ namespace RobotArm
     inline constexpr float upperArmLength = 2.0f;
     inline constexpr float forearmLength = 1.5f;
 
-    // 安装点位于桌面上表面；第一阶段只绘制固定姿态，不处理关节输入。
-    void draw(float mountX, float tabletopY, float mountZ);
+    // 安装点位于桌面上表面；绘制只读取状态，不处理输入或推进时间。
+    void draw(const State& state, float mountX, float tabletopY, float mountZ);
 }

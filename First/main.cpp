@@ -1,8 +1,10 @@
+#define NOMINMAX
 #include <GL/freeglut.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 #include "Geometry.h"
 #include "RobotArm.h"
 
@@ -11,9 +13,10 @@ namespace
     constexpr double pi = 3.14159265358979323846;
     constexpr double defaultCameraYaw = 28.0;
     constexpr double defaultCameraPitch = 22.0;
-    constexpr double cameraDistance = 12.5;
+    // 为大小臂完全抬起的姿态预留画面空间，而不只适配初始弯曲姿态。
+    constexpr double cameraDistance = 15.5;
     constexpr double mouseSensitivity = 0.35;
-    constexpr double cameraTargetY = 2.25;
+    constexpr double cameraTargetY = 2.9;
     constexpr float tabletopY = 2.0f;
     constexpr float tabletopThickness = 0.22f;
     constexpr float tableWidth = 8.0f;
@@ -27,6 +30,15 @@ namespace
     int lastMouseX = 0;
     int lastMouseY = 0;
     bool renderFailed = false;
+    int windowWidth = 1100;
+    int windowHeight = 780;
+    RobotArm::State armState;
+    RobotArm::Controls armControls;
+    std::uint32_t previousUpdateTime = 0;
+    bool controlsActive = false;
+#ifdef _WIN32
+    HWND nativeWindow = nullptr;
+#endif
 
     double viewDistance()
     {
@@ -34,7 +46,7 @@ namespace
     }
 }
 
-// 初始化在创建窗口之后执行；第一阶段只需要基础光照，不需要贴图资源。
+// 初始化在创建窗口之后执行；场景使用基础光照，不需要贴图资源。
 void initializeOpenGL()
 {
     glClearColor(0.085f, 0.115f, 0.16f, 1.0f);
@@ -60,6 +72,8 @@ void reshape(int width, int height)
 {
     width = std::max(width, 1);
     height = std::max(height, 1);
+    windowWidth = width;
+    windowHeight = height;
     aspectRatio = static_cast<double>(width) / height;
     glViewport(0, 0, width, height);
     glMatrixMode(GL_PROJECTION);
@@ -71,7 +85,7 @@ void reshape(int width, int height)
     glutPostRedisplay();
 }
 
-// 复用轨道相机：只改变观察方向，不修改机械臂各关节的固定姿态。
+// 复用轨道相机：只改变观察方向，不修改机械臂各关节的状态。
 void applyCamera()
 {
     const double yaw = cameraYaw * pi / 180.0;
@@ -124,7 +138,44 @@ void drawEnvironment()
     }
 }
 
-// 只在窗口事件或相机变化时重绘，没有动画定时器和持续空转的 idle 回调。
+// 使用独立二维投影绘制英文帮助，避免 GLUT 位图字体不支持中文。
+void drawStatus()
+{
+    glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0.0, windowWidth, 0.0, windowHeight, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glColor3f(0.95f, 0.96f, 0.98f);
+
+    char status[192];
+    std::snprintf(status, sizeof(status),
+                  "Base: %.1f  Shoulder: %.1f  Elbow: %.1f  Wrist: %.1f  Open: %.0f%%",
+                  armState.baseAngle, armState.shoulderAngle, armState.elbowAngle,
+                  armState.wristRoll, armState.opening * 100.0f);
+    const char* lines[] = {
+        "A/D: base   W/S: shoulder   Up/Down: elbow   Q/E: wrist   F/G: close/open",
+        "Hold to move | Drag: orbit | R: camera reset | Home: arm reset | Esc: exit",
+        status
+    };
+    for (int line = 0; line < 3; ++line)
+    {
+        glRasterPos2i(12, windowHeight - 22 - line * 20);
+        glutBitmapString(GLUT_BITMAP_8_BY_13, reinterpret_cast<const unsigned char*>(lines[line]));
+    }
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopAttrib();
+}
+
+// 绘制只读取关节状态；运动更新在定时回调中执行，不依赖显示刷新频率。
 void display()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -136,7 +187,8 @@ void display()
     const GLfloat lightDirection[] = { -3.0f, 6.0f, 4.0f, 0.0f };
     glLightfv(GL_LIGHT0, GL_POSITION, lightDirection);
     drawEnvironment();
-    RobotArm::draw(-1.5f, tabletopY, 0.0f);
+    RobotArm::draw(armState, -1.5f, tabletopY, 0.0f);
+    drawStatus();
 
     // 首帧及后续重绘若出现 OpenGL 错误，打印原因并以失败状态退出。
     const GLenum error = glGetError();
@@ -171,11 +223,50 @@ void mouseMotion(int x, int y)
     glutPostRedisplay();
 }
 
-// 这里只处理展示辅助键；W/S、A/D、方向键等机械臂控制留给第二阶段。
+bool hasControlFocus()
+{
+#ifdef _WIN32
+    // 鼠标移出窗口仍可控制；切换前台窗口或最小化才暂停。
+    return nativeWindow != nullptr && GetForegroundWindow() == nativeWindow && !IsIconic(nativeWindow);
+#else
+    return glutGet(GLUT_WINDOW_VISIBLE) != 0;
+#endif
+}
+
+// 无符号时间差支持毫秒计时器回绕；失焦及恢复时清空输入，丢弃暂停时间。
+void advanceControls(std::uint32_t now, bool active)
+{
+    const std::uint32_t elapsed = now - previousUpdateTime;
+    previousUpdateTime = now;
+    if (!active || !controlsActive)
+    {
+        armControls.clear();
+        if (!active) isDragging = false;
+        controlsActive = active;
+        return;
+    }
+    const double seconds = std::min(static_cast<double>(elapsed) / 1000.0, 0.05);
+    if (RobotArm::update(armState, armControls, seconds)) glutPostRedisplay();
+}
+
+void synchronizeControls()
+{
+    advanceControls(static_cast<std::uint32_t>(glutGet(GLUT_ELAPSED_TIME)), hasControlFocus());
+}
+
+void updateTimer(int)
+{
+    synchronizeControls();
+    glutTimerFunc(16, updateTimer, 0);
+}
+
 void keyboard(unsigned char key, int, int)
 {
+    // 先结算旧按键状态对应的时间，再处理按键边沿，避免把按下之前的时间算进去。
+    synchronizeControls();
     if (key == 27)
     {
+        armControls.clear();
         glutLeaveMainLoop();
     }
     else if (key == 'r' || key == 'R')
@@ -185,6 +276,45 @@ void keyboard(unsigned char key, int, int)
         isDragging = false;
         glutPostRedisplay();
     }
+    else if (controlsActive)
+    {
+        RobotArm::setLetter(armControls, key, true);
+    }
+}
+
+void keyboardUp(unsigned char key, int, int)
+{
+    synchronizeControls();
+    // 按住字母后再按 Ctrl，freeglut 可能用控制字符报告松键；仍需释放原动作。
+    if (key >= 1 && key <= 26) key = static_cast<unsigned char>('a' + key - 1);
+    RobotArm::setLetter(armControls, key, false);
+}
+
+void specialKeyboard(int key, int, int)
+{
+    synchronizeControls();
+    if (!controlsActive) return;
+    if (key == GLUT_KEY_HOME)
+    {
+        armControls.clear();
+        armState = RobotArm::State{};
+        glutPostRedisplay();
+    }
+    else if (key == GLUT_KEY_UP)
+    {
+        armControls.set(RobotArm::Action::ElbowUp, true);
+    }
+    else if (key == GLUT_KEY_DOWN)
+    {
+        armControls.set(RobotArm::Action::ElbowDown, true);
+    }
+}
+
+void specialKeyboardUp(int key, int, int)
+{
+    synchronizeControls();
+    if (key == GLUT_KEY_UP) armControls.set(RobotArm::Action::ElbowUp, false);
+    else if (key == GLUT_KEY_DOWN) armControls.set(RobotArm::Action::ElbowDown, false);
 }
 
 int main(int argc, char** argv)
@@ -193,7 +323,7 @@ int main(int argc, char** argv)
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(1100, 780);
     glutInitWindowPosition(80, 60);
-    glutCreateWindow("OpenGL Robot Arm - Phase 1 | Drag: orbit | R: reset | Esc: exit");
+    glutCreateWindow("OpenGL Robot Arm - Phase 2 | Keyboard joint control");
     glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_GLUTMAINLOOP_RETURNS);
 
     initializeOpenGL();
@@ -202,7 +332,24 @@ int main(int argc, char** argv)
     glutMouseFunc(mouseButton);
     glutMotionFunc(mouseMotion);
     glutKeyboardFunc(keyboard);
-    std::puts("Phase 1: static robot arm scene. Drag left mouse to orbit; R to reset; Esc to exit.");
+    glutKeyboardUpFunc(keyboardUp);
+    glutSpecialFunc(specialKeyboard);
+    glutSpecialUpFunc(specialKeyboardUp);
+    glutIgnoreKeyRepeat(1);
+#ifdef _WIN32
+    nativeWindow = WindowFromDC(wglGetCurrentDC());
+    if (nativeWindow == nullptr)
+    {
+        std::fputs("Cannot identify the OpenGL window for keyboard focus checks.\n", stderr);
+        glutDestroyWindow(glutGetWindow());
+        return EXIT_FAILURE;
+    }
+#endif
+    previousUpdateTime = static_cast<std::uint32_t>(glutGet(GLUT_ELAPSED_TIME));
+    controlsActive = hasControlFocus();
+    glutTimerFunc(16, updateTimer, 0);
+    std::puts("Phase 2: hold A/D base, W/S shoulder, Up/Down elbow, Q/E wrist, F/G close/open.");
+    std::puts("Drag: orbit | R: camera reset | Home: arm reset | Esc: exit. Focus loss stops movement.");
     glutMainLoop();
     return renderFailed ? EXIT_FAILURE : EXIT_SUCCESS;
 }

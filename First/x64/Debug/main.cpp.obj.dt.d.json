@@ -210,7 +210,9 @@
             "t:\\appsystemfiles\\visual_studio\\vc\\tools\\msvc\\14.51.36231\\include\\tuple",
             "t:\\appsystemfiles\\visual_studio\\vc\\tools\\msvc\\14.51.36231\\include\\cmath",
             "t:\\appextrafiles\\visual studio\\projects\\testopengl\\first\\first\\geometry.h",
-            "t:\\appextrafiles\\visual studio\\projects\\testopengl\\first\\first\\robotarm.h"
+            "t:\\appextrafiles\\visual studio\\projects\\testopengl\\first\\first\\robotarm.h",
+            "t:\\appextrafiles\\visual studio\\projects\\testopengl\\first\\first\\robotarmcontrol.h",
+            "t:\\appsystemfiles\\visual_studio\\vc\\tools\\msvc\\14.51.36231\\include\\array"
         ],
         "ImportedModules": [],
         "ImportedHeaderUnits": []

@@ -5,16 +5,9 @@
 
 namespace
 {
-    // 第一阶段的静态展示角度；后续控制应修改关节参数，而不是各部件的世界坐标。
-    constexpr float baseAngle = 0.0f;
-    constexpr float shoulderAngle = -35.0f;
-    constexpr float elbowAngle = -65.0f;
-    // 让两指在默认视角下分开可见，避免改变肘轴后沿视线互相遮挡。
-    constexpr float wristRoll = 90.0f;
     constexpr float platformHeight = 0.16f;
     constexpr float baseHeight = 0.44f;
     constexpr float shoulderHeight = 0.32f;
-    constexpr float fingerOffset = 0.24f;
     constexpr float fingerLength = 0.48f;
 
     const Geometry::Material armPaint{ 0.93f, 0.43f, 0.08f, 0.38f, 48.0f };
@@ -51,9 +44,10 @@ namespace
         }
     }
 
-    // 掌座沿小臂轴线连接；夹指位于局部 Z 的两侧，保持固定张开。
-    void drawGripper()
+    // 掌座沿小臂轴线连接；两侧夹指和夹持垫对称移动，闭合时内侧刚好接触。
+    void drawGripper(float opening)
     {
+        const float fingerOffset = RobotArm::fingerOffset(opening);
         Geometry::setMaterial(silver);
         Geometry::drawCylinder(0.18f, 0.23f);
         glTranslatef(0.0f, 0.23f, 0.0f);
@@ -73,7 +67,7 @@ namespace
     }
 }
 
-void RobotArm::draw(float mountX, float tabletopY, float mountZ)
+void RobotArm::draw(const State& state, float mountX, float tabletopY, float mountZ)
 {
     glPushMatrix();
     glTranslatef(mountX, tabletopY, mountZ);
@@ -95,7 +89,7 @@ void RobotArm::draw(float mountX, float tabletopY, float mountZ)
 
     // 底座 → 肩关节：从这里开始，所有下游部件都继承底座坐标系。
     glTranslatef(0.0f, platformHeight, 0.0f);
-    glRotatef(baseAngle, 0.0f, 1.0f, 0.0f);
+    glRotatef(state.baseAngle, 0.0f, 1.0f, 0.0f);
     Geometry::setMaterial(silver);
     Geometry::drawCylinder(0.48f, 0.10f);
     glTranslatef(0.0f, 0.10f, 0.0f);
@@ -108,7 +102,7 @@ void RobotArm::draw(float mountX, float tabletopY, float mountZ)
     drawPitchJoint(0.30f, 0.68f);
 
     // 大臂沿局部 +Y 延伸。图元缩放被封装隔离，不会缩放后续关节位置。
-    glRotatef(shoulderAngle, 0.0f, 0.0f, 1.0f);
+    glRotatef(state.shoulderAngle, 0.0f, 0.0f, 1.0f);
     drawLink(upperArmLength, 0.34f, 0.38f);
     glTranslatef(0.0f, upperArmLength, 0.0f);
     // 只将肘关节模型的圆柱轴从 Z 转到 X，避免影响小臂本身的初始朝向。
@@ -119,7 +113,7 @@ void RobotArm::draw(float mountX, float tabletopY, float mountZ)
 
     // 肩绕局部 Z 扫过 XY 平面；肘绕大臂局部 X，使小臂扫过与之垂直的 YZ 平面。
     // 该 X 轴继承大臂的姿态，不是世界 X 轴；腕部和夹爪继续继承小臂坐标系。
-    glRotatef(elbowAngle, 1.0f, 0.0f, 0.0f);
+    glRotatef(state.elbowAngle, 1.0f, 0.0f, 0.0f);
     drawLink(forearmLength, 0.27f, 0.30f);
     glTranslatef(0.0f, forearmLength, 0.0f);
     Geometry::setMaterial(darkMetal);
@@ -127,7 +121,7 @@ void RobotArm::draw(float mountX, float tabletopY, float mountZ)
     glTranslatef(0.0f, 0.16f, 0.0f);
 
     // 腕部只绕小臂纵轴旋转，不能误用世界 Y 轴或额外改变小臂俯仰。
-    glRotatef(wristRoll, 0.0f, 1.0f, 0.0f);
-    drawGripper();
+    glRotatef(state.wristRoll, 0.0f, 1.0f, 0.0f);
+    drawGripper(state.opening);
     glPopMatrix();
 }

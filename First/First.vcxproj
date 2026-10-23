@@ -156,10 +156,12 @@
     <ClCompile Include="Geometry.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="RobotArm.cpp" />
+    <ClCompile Include="RobotArmControl.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Geometry.h" />
     <ClInclude Include="RobotArm.h" />
+    <ClInclude Include="RobotArmControl.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -24,12 +24,18 @@
     <ClCompile Include="RobotArm.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="RobotArmControl.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Geometry.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="RobotArm.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="RobotArmControl.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
