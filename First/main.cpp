@@ -7,6 +7,7 @@
 #include <cstdint>
 #include "Geometry.h"
 #include "RobotArm.h"
+#include "CubeWorld.h"
 
 namespace
 {
@@ -17,10 +18,10 @@ namespace
     constexpr double cameraDistance = 15.5;
     constexpr double mouseSensitivity = 0.35;
     constexpr double cameraTargetY = 2.9;
-    constexpr float tabletopY = 2.0f;
+    constexpr float tabletopY = static_cast<float>(RobotArm::tabletopY);
     constexpr float tabletopThickness = 0.22f;
-    constexpr float tableWidth = 8.0f;
-    constexpr float tableDepth = 4.8f;
+    constexpr float tableWidth = static_cast<float>(RobotArm::tableHalfWidth * 2);
+    constexpr float tableDepth = static_cast<float>(RobotArm::tableHalfDepth * 2);
 
     double cameraYaw = defaultCameraYaw;
     double cameraPitch = defaultCameraPitch;
@@ -34,6 +35,7 @@ namespace
     int windowHeight = 780;
     RobotArm::State armState;
     RobotArm::Controls armControls;
+    CubeWorld::World cubeWorld;
     std::uint32_t previousUpdateTime = 0;
     bool controlsActive = false;
 #ifdef _WIN32
@@ -138,6 +140,35 @@ void drawEnvironment()
     }
 }
 
+void drawCubes()
+{
+    const Geometry::Material colors[] = {
+        {0.90f, 0.18f, 0.16f, 0.30f, 32.0f},
+        {0.15f, 0.72f, 0.34f, 0.30f, 32.0f},
+        {0.15f, 0.43f, 0.94f, 0.30f, 32.0f}
+    };
+    for (std::size_t i = 0; i < cubeWorld.cubes.size(); ++i)
+    {
+        const auto& cube = cubeWorld.cubes[i];
+        glPushMatrix();
+        glMultMatrixd(cube.pose.m.data());
+        Geometry::setMaterial(colors[i % 3]);
+        const float size = static_cast<float>(cube.size);
+        Geometry::drawBox(0, 0, 0, size, size, size);
+        // 线框只做状态提示，不改变抓取区域或方块世界变换。
+        if (static_cast<int>(i) == cubeWorld.candidateIndex || static_cast<int>(i) == cubeWorld.heldIndex)
+        {
+            glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LINE_BIT);
+            glDisable(GL_LIGHTING);
+            glColor3f(1.0f, 0.92f, 0.16f);
+            glLineWidth(2.0f);
+            glutWireCube(cube.size + 0.006);
+            glPopAttrib();
+        }
+        glPopMatrix();
+    }
+}
+
 // 使用独立二维投影绘制英文帮助，避免 GLUT 位图字体不支持中文。
 void drawStatus()
 {
@@ -155,15 +186,28 @@ void drawStatus()
 
     char status[192];
     std::snprintf(status, sizeof(status),
-                  "Base: %.1f  Shoulder: %.1f  Elbow: %.1f  Wrist: %.1f  Open: %.0f%%",
+                  "Base: %.2f  Shoulder: %.2f  Elbow: %.2f  Wrist: %.2f  Open: %.0f%%  Speed: %s",
                   armState.baseAngle, armState.shoulderAngle, armState.elbowAngle,
-                  armState.wristRoll, armState.opening * 100.0f);
+                  armState.wristRoll, armState.opening * 100.0f, armControls.precision ? "FINE" : "NORMAL");
+    char graspStatus[160];
+    if (cubeWorld.heldIndex >= 0)
+        std::snprintf(graspStatus, sizeof(graspStatus), "HOLDING cube #%d | G: release",
+                      cubeWorld.cubes[cubeWorld.heldIndex].id);
+    else if (cubeWorld.candidateIndex >= 0)
+        std::snprintf(graspStatus, sizeof(graspStatus), "READY cube #%d | Hold F to grasp",
+                      cubeWorld.cubes[cubeWorld.candidateIndex].id);
+    else if (cubeWorld.lastReleasedId != 0)
+        std::snprintf(graspStatus, sizeof(graspStatus), "Released cube #%d | Align between pads, then F",
+                      cubeWorld.lastReleasedId);
+    else
+        std::snprintf(graspStatus, sizeof(graspStatus), "No target | Align between both pads, then F");
     const char* lines[] = {
         "A/D: base   W/S: shoulder   Up/Down: elbow   Q/E: wrist   F/G: close/open",
-        "Hold to move | Drag: orbit | R: camera reset | Home: arm reset | Esc: exit",
-        status
+        "Drag: orbit | R: camera | Home: arm reset/drop | End: scene reset | Esc: exit",
+        status, graspStatus,
+        "Space: fine speed | Red pickup: Base 0, Shoulder -10.62, Elbow 0, Wrist 0"
     };
-    for (int line = 0; line < 3; ++line)
+    for (int line = 0; line < 5; ++line)
     {
         glRasterPos2i(12, windowHeight - 22 - line * 20);
         glutBitmapString(GLUT_BITMAP_8_BY_13, reinterpret_cast<const unsigned char*>(lines[line]));
@@ -187,7 +231,9 @@ void display()
     const GLfloat lightDirection[] = { -3.0f, 6.0f, 4.0f, 0.0f };
     glLightfv(GL_LIGHT0, GL_POSITION, lightDirection);
     drawEnvironment();
-    RobotArm::draw(armState, -1.5f, tabletopY, 0.0f);
+    RobotArm::draw(armState, static_cast<float>(RobotArm::mountPosition.x), tabletopY,
+                   static_cast<float>(RobotArm::mountPosition.z));
+    drawCubes();
     drawStatus();
 
     // 首帧及后续重绘若出现 OpenGL 错误，打印原因并以失败状态退出。
@@ -246,7 +292,8 @@ void advanceControls(std::uint32_t now, bool active)
         return;
     }
     const double seconds = std::min(static_cast<double>(elapsed) / 1000.0, 0.05);
-    if (RobotArm::update(armState, armControls, seconds)) glutPostRedisplay();
+    // 即使机械臂静止也推进未附着方块的下落，状态机内部做短步接触检测。
+    if (cubeWorld.step(armState, armControls, seconds)) glutPostRedisplay();
 }
 
 void synchronizeControls()
@@ -276,6 +323,11 @@ void keyboard(unsigned char key, int, int)
         isDragging = false;
         glutPostRedisplay();
     }
+    else if (controlsActive && key == ' ')
+    {
+        armControls.precision = !armControls.precision;
+        glutPostRedisplay();
+    }
     else if (controlsActive)
     {
         RobotArm::setLetter(armControls, key, true);
@@ -297,7 +349,15 @@ void specialKeyboard(int key, int, int)
     if (key == GLUT_KEY_HOME)
     {
         armControls.clear();
+        cubeWorld.resetArm(armState);
+        glutPostRedisplay();
+    }
+    else if (key == GLUT_KEY_END)
+    {
+        armControls.clear();
         armState = RobotArm::State{};
+        cubeWorld.reset();
+        cubeWorld.refreshCandidate(armState);
         glutPostRedisplay();
     }
     else if (key == GLUT_KEY_UP)
@@ -323,7 +383,7 @@ int main(int argc, char** argv)
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(1100, 780);
     glutInitWindowPosition(80, 60);
-    glutCreateWindow("OpenGL Robot Arm - Phase 2 | Keyboard joint control");
+    glutCreateWindow("OpenGL Robot Arm - Phase 3 | Manual cube pick and place");
     glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_GLUTMAINLOOP_RETURNS);
 
     initializeOpenGL();
@@ -348,8 +408,10 @@ int main(int argc, char** argv)
     previousUpdateTime = static_cast<std::uint32_t>(glutGet(GLUT_ELAPSED_TIME));
     controlsActive = hasControlFocus();
     glutTimerFunc(16, updateTimer, 0);
-    std::puts("Phase 2: hold A/D base, W/S shoulder, Up/Down elbow, Q/E wrist, F/G close/open.");
-    std::puts("Drag: orbit | R: camera reset | Home: arm reset | Esc: exit. Focus loss stops movement.");
+    cubeWorld.refreshCandidate(armState);
+    std::puts("Phase 3: hold A/D base, W/S shoulder, Up/Down elbow, Q/E wrist, F/G close/open.");
+    std::puts("Shoulder horizontal=0. Red pickup: base0 shoulder-10.62 elbow0 wrist0, then hold F.");
+    std::puts("Drag: orbit | R: camera | Home: arm reset/drop | End: scene reset | Esc: exit.");
     glutMainLoop();
     return renderFailed ? EXIT_FAILURE : EXIT_SUCCESS;
 }

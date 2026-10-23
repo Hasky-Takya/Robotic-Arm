@@ -9,7 +9,8 @@ namespace RobotArm
     struct State
     {
         float baseAngle = 0;
-        float shoulderAngle = -35;
+        // 大臂以水平为零位；55 度保持原有初始外观，负角度可下降到桌面。
+        float shoulderAngle = 55;
         float elbowAngle = -65;
         float wristRoll = 90;
         float opening = 1;
@@ -31,6 +32,8 @@ namespace RobotArm
     struct Controls
     {
         std::array<bool, static_cast<std::size_t>(Action::Count)> held{};
+        // 空格切换微调，便于将窄夹爪对准方块；不改变落体模拟速度。
+        bool precision = false;
 
         void set(Action action, bool pressed);
         void clear();

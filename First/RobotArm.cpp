@@ -5,10 +5,10 @@
 
 namespace
 {
-    constexpr float platformHeight = 0.16f;
-    constexpr float baseHeight = 0.44f;
-    constexpr float shoulderHeight = 0.32f;
-    constexpr float fingerLength = 0.48f;
+    constexpr float platformHeightF = static_cast<float>(RobotArm::platformHeight);
+    constexpr float baseHeightF = static_cast<float>(RobotArm::baseHeight);
+    constexpr float shoulderHeightF = static_cast<float>(RobotArm::shoulderHeight);
+    constexpr float fingerLength = static_cast<float>(RobotArm::fingerLength);
 
     const Geometry::Material armPaint{ 0.93f, 0.43f, 0.08f, 0.38f, 48.0f };
     const Geometry::Material darkMetal{ 0.15f, 0.19f, 0.24f, 0.55f, 64.0f };
@@ -49,79 +49,89 @@ namespace
     {
         const float fingerOffset = RobotArm::fingerOffset(opening);
         Geometry::setMaterial(silver);
-        Geometry::drawCylinder(0.18f, 0.23f);
-        glTranslatef(0.0f, 0.23f, 0.0f);
+        Geometry::drawCylinder(0.18f, static_cast<float>(RobotArm::collarHeight));
+        glTranslated(0.0, RobotArm::collarHeight, 0.0);
         Geometry::setMaterial(darkMetal);
-        Geometry::drawBox(0.0f, 0.08f, 0.0f, 0.30f, 0.16f, 0.68f);
+        constexpr float palmHeightF = static_cast<float>(RobotArm::palmHeight);
+        Geometry::drawBox(0.0f, palmHeightF / 2.0f, 0.0f, 0.30f, palmHeightF, 0.68f);
         for (const float side : { -1.0f, 1.0f })
         {
             Geometry::setMaterial(silver);
-            Geometry::drawBox(0.0f, 0.16f + fingerLength / 2.0f, side * fingerOffset,
+            Geometry::drawBox(0.0f, palmHeightF + fingerLength / 2.0f, side * fingerOffset,
                               0.16f, fingerLength, 0.12f);
             // 内侧深色夹持垫与银色手指区分，张开间隙中不放置抓取物。
             Geometry::setMaterial(rubber);
-            Geometry::drawBox(0.0f, 0.16f + fingerLength * 0.72f,
+            Geometry::drawBox(0.0f, palmHeightF + fingerLength * 0.72f,
                               side * (fingerOffset - 0.075f),
-                              0.17f, fingerLength * 0.44f, 0.03f);
+                              static_cast<float>(RobotArm::padHalfX * 2),
+                              static_cast<float>(RobotArm::padHalfY * 2), 0.03f);
         }
     }
 }
 
 void RobotArm::draw(const State& state, float mountX, float tabletopY, float mountZ)
 {
+    const Frames frames = forwardKinematics(state, {mountX, tabletopY, mountZ});
     glPushMatrix();
-    glTranslatef(mountX, tabletopY, mountZ);
+    glMultMatrixd(frames.mount.m.data());
 
     // 固定平台不继承旋转底座的角度，底面与桌面上表面重合。
     Geometry::setMaterial(darkMetal);
-    Geometry::drawBox(0.0f, platformHeight / 2.0f, 0.0f, 1.30f, platformHeight, 1.10f);
+    Geometry::drawBox(0.0f, platformHeightF / 2.0f, 0.0f, 1.30f, platformHeightF, 1.10f);
     Geometry::setMaterial(silver);
     for (const float x : { -0.49f, 0.49f })
     {
         for (const float z : { -0.39f, 0.39f })
         {
             glPushMatrix();
-            glTranslatef(x, platformHeight, z);
+            glTranslatef(x, platformHeightF, z);
             Geometry::drawCylinder(0.055f, 0.035f);
             glPopMatrix();
         }
     }
 
-    // 底座 → 肩关节：从这里开始，所有下游部件都继承底座坐标系。
-    glTranslatef(0.0f, platformHeight, 0.0f);
-    glRotatef(state.baseAngle, 0.0f, 1.0f, 0.0f);
+    glPopMatrix();
+
+    // 每个世界矩阵都由共享 FK 生成，抓取检测与画面使用同一套父子变换。
+    glPushMatrix();
+    glMultMatrixd(frames.base.m.data());
     Geometry::setMaterial(silver);
     Geometry::drawCylinder(0.48f, 0.10f);
     glTranslatef(0.0f, 0.10f, 0.0f);
     Geometry::setMaterial(armPaint);
-    Geometry::drawCylinder(0.39f, baseHeight - 0.10f);
-    glTranslatef(0.0f, baseHeight - 0.10f, 0.0f);
+    Geometry::drawCylinder(0.39f, baseHeightF - 0.10f);
+    glTranslatef(0.0f, baseHeightF - 0.10f, 0.0f);
     Geometry::setMaterial(darkMetal);
-    Geometry::drawBox(0.0f, shoulderHeight / 2.0f, 0.0f, 0.48f, shoulderHeight, 0.50f);
-    glTranslatef(0.0f, shoulderHeight, 0.0f);
-    drawPitchJoint(0.30f, 0.68f);
+    Geometry::drawBox(0.0f, shoulderHeightF / 2.0f, 0.0f, 0.48f, shoulderHeightF, 0.50f);
+    glPopMatrix();
 
-    // 大臂沿局部 +Y 延伸。图元缩放被封装隔离，不会缩放后续关节位置。
-    glRotatef(state.shoulderAngle, 0.0f, 0.0f, 1.0f);
-    drawLink(upperArmLength, 0.34f, 0.38f);
-    glTranslatef(0.0f, upperArmLength, 0.0f);
-    // 只将肘关节模型的圆柱轴从 Z 转到 X，避免影响小臂本身的初始朝向。
     glPushMatrix();
+    glMultMatrixd(frames.shoulder.m.data());
+    drawPitchJoint(0.30f, 0.68f);
+    glPopMatrix();
+    glPushMatrix();
+    glMultMatrixd(frames.upperArm.m.data());
+    drawLink(upperArmLength, 0.34f, 0.38f);
+    glPopMatrix();
+
+    // 肘部圆柱沿大臂局部 X；模型转向不混入小臂的运动学矩阵。
+    glPushMatrix();
+    glMultMatrixd(frames.elbow.m.data());
     glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
     drawPitchJoint(0.25f, 0.60f);
     glPopMatrix();
-
-    // 肩绕局部 Z 扫过 XY 平面；肘绕大臂局部 X，使小臂扫过与之垂直的 YZ 平面。
-    // 该 X 轴继承大臂的姿态，不是世界 X 轴；腕部和夹爪继续继承小臂坐标系。
-    glRotatef(state.elbowAngle, 1.0f, 0.0f, 0.0f);
+    glPushMatrix();
+    glMultMatrixd(frames.forearm.m.data());
     drawLink(forearmLength, 0.27f, 0.30f);
-    glTranslatef(0.0f, forearmLength, 0.0f);
-    Geometry::setMaterial(darkMetal);
-    Geometry::drawCylinder(0.21f, 0.16f);
-    glTranslatef(0.0f, 0.16f, 0.0f);
+    glPopMatrix();
 
-    // 腕部只绕小臂纵轴旋转，不能误用世界 Y 轴或额外改变小臂俯仰。
-    glRotatef(state.wristRoll, 0.0f, 1.0f, 0.0f);
+    glPushMatrix();
+    glMultMatrixd(frames.wrist.m.data());
+    Geometry::setMaterial(darkMetal);
+    Geometry::drawCylinder(0.21f, static_cast<float>(wristHeight));
+    glPopMatrix();
+    glPushMatrix();
+    glMultMatrixd(frames.gripper.m.data());
     drawGripper(state.opening);
     glPopMatrix();
 }

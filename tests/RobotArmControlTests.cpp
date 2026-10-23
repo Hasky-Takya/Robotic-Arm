@@ -41,7 +41,7 @@ namespace
     void testDefaultsAndEquality()
     {
         const State state;
-        check(state.baseAngle == 0 && state.shoulderAngle == -35
+        check(state.baseAngle == 0 && state.shoulderAngle == 55
               && state.elbowAngle == -65 && state.wristRoll == 90
               && state.opening == 1, "default pose");
         check(state == State{}, "equal states compare equal");
@@ -150,7 +150,7 @@ namespace
                               Action::WristRight, Action::Close})
             controls.set(action, true);
         check(RobotArm::update(state, controls, 0.1), "multiple axes update together");
-        check(nearState(state, State{6, -30.5f, -69.5f, 81, 0.9f}),
+        check(nearState(state, State{6, 59.5f, -69.5f, 81, 0.9f}),
               "simultaneous axes retain independent rates");
     }
 
@@ -267,8 +267,9 @@ namespace
         for (Action action : {Action::BaseLeft, Action::ShoulderUp, Action::ElbowUp,
                               Action::WristRight, Action::Close})
             controls.set(action, true);
-        State whole;
-        State partitioned;
+        // 用中间角度检查分步积分，避免将较大 float 默认肩角的累积舍入误差混入测试。
+        State whole{0, 0, 0, 90, 1};
+        State partitioned = whole;
         RobotArm::update(whole, controls, 0.7);
         for (int frame = 0; frame < 70; ++frame)
             RobotArm::update(partitioned, controls, 0.01);
@@ -309,6 +310,21 @@ namespace
         }
     }
 
+    void testPrecision()
+    {
+        Controls controls;
+        controls.precision = true;
+        controls.set(Action::BaseLeft, true);
+        controls.set(Action::ShoulderDown, true);
+        controls.set(Action::Close, true);
+        State state;
+        RobotArm::update(state, controls, 0.1);
+        check(near(state.baseAngle, 0.12f) && near(state.shoulderAngle, 54.91f)
+              && near(state.opening, 0.99f), "precision scales joints to 1/50 and opening to 1/10");
+        controls.clear();
+        check(controls.precision, "clearing pressed keys preserves selected speed");
+    }
+
     void testInvalidActions()
     {
         Controls controls;
@@ -335,6 +351,7 @@ int main()
     testFingerOffset();
     testTimeHandling();
     testInvalidActions();
+    testPrecision();
 
     if (failures != 0)
     {

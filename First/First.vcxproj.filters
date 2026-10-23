@@ -27,6 +27,12 @@
     <ClCompile Include="RobotArmControl.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="RobotArmKinematics.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="CubeWorld.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Geometry.h">
@@ -36,6 +42,12 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="RobotArmControl.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="RobotArmKinematics.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="CubeWorld.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

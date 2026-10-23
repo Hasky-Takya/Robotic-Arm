@@ -81,6 +81,9 @@ bool RobotArm::update(State& state, const Controls& controls, double deltaSecond
     if (!std::isfinite(deltaSeconds) || deltaSeconds <= 0.0)
         return false;
 
+    // 夹持居中容差较小，关节使用 1/50 速度便于手动对准；夹爪保留 1/10 速度。
+    const double openingSeconds = deltaSeconds * (controls.precision ? 0.1 : 1.0);
+    if (controls.precision) deltaSeconds *= 0.02;
     const State before = state;
     const int base = direction(controls, Action::BaseLeft, Action::BaseRight);
     const int shoulder = direction(controls, Action::ShoulderUp, Action::ShoulderDown);
@@ -101,7 +104,7 @@ bool RobotArm::update(State& state, const Controls& controls, double deltaSecond
         state.wristRoll = advanceAngle(state.wristRoll, wrist * wristSpeed, deltaSeconds);
     if (opening != 0)
         state.opening = advanceClamped(state.opening, opening * openingSpeed,
-                                      deltaSeconds, 0.0, 1.0);
+                                      openingSeconds, 0.0, 1.0);
 
     return !(state == before);
 }

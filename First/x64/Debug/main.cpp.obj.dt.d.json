@@ -211,8 +211,13 @@
             "t:\\appsystemfiles\\visual_studio\\vc\\tools\\msvc\\14.51.36231\\include\\cmath",
             "t:\\appextrafiles\\visual studio\\projects\\testopengl\\first\\first\\geometry.h",
             "t:\\appextrafiles\\visual studio\\projects\\testopengl\\first\\first\\robotarm.h",
+            "t:\\appextrafiles\\visual studio\\projects\\testopengl\\first\\first\\robotarmkinematics.h",
             "t:\\appextrafiles\\visual studio\\projects\\testopengl\\first\\first\\robotarmcontrol.h",
-            "t:\\appsystemfiles\\visual_studio\\vc\\tools\\msvc\\14.51.36231\\include\\array"
+            "t:\\appsystemfiles\\visual_studio\\vc\\tools\\msvc\\14.51.36231\\include\\array",
+            "t:\\appextrafiles\\visual studio\\projects\\testopengl\\first\\first\\cubeworld.h",
+            "t:\\appsystemfiles\\visual_studio\\vc\\tools\\msvc\\14.51.36231\\include\\vector",
+            "t:\\appsystemfiles\\visual_studio\\vc\\tools\\msvc\\14.51.36231\\include\\__msvc_sanitizer_annotate_container.hpp",
+            "t:\\appsystemfiles\\visual_studio\\vc\\tools\\msvc\\14.51.36231\\include\\xpolymorphic_allocator.h"
         ],
         "ImportedModules": [],
         "ImportedHeaderUnits": []
